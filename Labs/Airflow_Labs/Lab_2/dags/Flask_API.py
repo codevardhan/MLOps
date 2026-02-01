@@ -10,7 +10,8 @@ from airflow.providers.standard.operators.python import PythonOperator
 from flask import Flask, redirect, render_template
 
 # ---------- Config (Airflow 3: use REST with Basic Auth via FAB API backend) ----------
-WEBSERVER = os.getenv("AIRFLOW_WEBSERVER", "http://airflow-apiserver:8080")
+# Default to the standard webserver service name; override with AIRFLOW_WEBSERVER if needed.
+WEBSERVER = os.getenv("AIRFLOW_WEBSERVER", "http://airflow-webserver:8080")
 AF_USER   = os.getenv("AIRFLOW_USERNAME", os.getenv("_AIRFLOW_WWW_USER_USERNAME", "airflow"))
 AF_PASS   = os.getenv("AIRFLOW_PASSWORD", os.getenv("_AIRFLOW_WWW_USER_PASSWORD", "airflow"))
 TARGET_DAG_ID = os.getenv("TARGET_DAG_ID", "Airflow_Lab2")
@@ -26,19 +27,24 @@ app = Flask(__name__, template_folder="templates")
 
 def get_latest_run_info():
     """
-    Query Airflow stable REST API (/api/v2) using Basic Auth.
-    Requires Airflow to be configured with:
+    Query Airflow stable REST API (/api/v1) using Basic Auth.
+    Requires Airflow webserver to be configured with:
       AIRFLOW__FAB__AUTH_BACKENDS=airflow.providers.fab.auth_manager.api.auth.backend.basic_auth
     """
+    # in Flask_API.py
     url = f"{WEBSERVER}/api/v2/dags/{TARGET_DAG_ID}/dagRuns?order_by=-logical_date&limit=1"
     try:
-        r = requests.get(url, auth=(AF_USER, AF_PASS), timeout=5)
+        r = requests.get(
+            url,
+            auth=(AF_USER, AF_PASS),
+            timeout=10,
+            headers={"Accept": "application/json"},
+        )
     except Exception as e:
         return False, {"note": f"Exception calling Airflow API: {e}"}
 
     # If auth/backend is not set correctly you'll get 401 here.
     if r.status_code != 200:
-        # Surface a short note (kept small to avoid template overflow)
         snippet = r.text[:200].replace("\n", " ")
         return False, {"note": f"API status {r.status_code}: {snippet}"}
 
@@ -47,13 +53,13 @@ def get_latest_run_info():
         return False, {"note": "No DagRuns found yet."}
 
     run = runs[0]
-    state = run.get("state")
+    state = run.get("state", "")
     info = {
         "state": state,
-        "run_id": run.get("dag_run_id"),
-        "logical_date": run.get("logical_date"),
-        "start_date": run.get("start_date"),
-        "end_date": run.get("end_date"),
+        "run_id": run.get("dag_run_id", ""),
+        "logical_date": run.get("logical_date", ""),
+        "start_date": run.get("start_date", ""),
+        "end_date": run.get("end_date", ""),
         "note": "",
     }
     return state == "success", info
